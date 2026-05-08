@@ -28,6 +28,12 @@
 #define TCPING_TIMEOUT 2
 #define TCPING_ERROR 255
 
+// 返回连接时间(毫秒)的结构体
+struct tcping_result {
+    int status;
+    double time_ms;  // 连接时间，毫秒
+};
+
 struct hostinfo {
     struct addrinfo *ai;
     char name[INET6_ADDRSTRLEN];
@@ -38,7 +44,8 @@ int tcping_gethostinfo(char *node, char *serv, int ai_family,
                        struct hostinfo **hi);
 void tcping_freehostinfo(struct hostinfo *hi);
 int tcping_socket(struct hostinfo *host);
-int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout);
+int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout,
+                   double *time_ms);
 int tcping_close(int sockfd);
 
 #endif
