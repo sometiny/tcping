@@ -1,5 +1,20 @@
 #include "tcping.h"
 
+// 跨平台获取时间（毫秒）
+static double get_time_ms(void)
+{
+#ifdef _WIN32
+    LARGE_INTEGER freq, count;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (double)count.QuadPart / freq.QuadPart * 1000.0;
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
+#endif
+}
+
 int tcping_gethostinfo(char *node, char *serv, int ai_family,
                        struct hostinfo **hi)
 {
@@ -30,22 +45,31 @@ int tcping_socket(struct hostinfo *host)
 {
     int sockfd = socket(host->ai->ai_family, host->ai->ai_socktype,
                         host->ai->ai_protocol);
+#ifdef _WIN32
+    // Windows: 使用 ioctlsocket 设置非阻塞
+    unsigned long mode = 1;
+    ioctlsocket(sockfd, FIONBIO, &mode);
+#else
+    // Linux/Unix: 使用 fcntl 设置非阻塞
     fcntl(sockfd, F_SETFL, O_NONBLOCK);
+#endif
     return sockfd;
 }
 
 int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout,
                    double *time_ms)
 {
-    struct timeval start, end;
-    gettimeofday(&start, NULL);
+    double start = get_time_ms();
 
     int ret;
     if ((ret = connect(sockfd, host->ai->ai_addr, host->ai->ai_addrlen)) != 0) {
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err != WSAEWOULDBLOCK) {
+#else
         if (errno != EINPROGRESS) {
-            gettimeofday(&end, NULL);
-            *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                       (end.tv_usec - start.tv_usec) / 1000.0;
+#endif
+            *time_ms = get_time_ms() - start;
             return TCPING_ERROR;
         }
         fd_set fdrset, fdwset;
@@ -57,40 +81,36 @@ int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout,
                                                                  : NULL)) ==
             0) {
             /* timeout */
-            gettimeofday(&end, NULL);
-            *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                       (end.tv_usec - start.tv_usec) / 1000.0;
+            *time_ms = get_time_ms() - start;
             return TCPING_TIMEOUT;
         }
         int error = 0;
         if (FD_ISSET(sockfd, &fdrset) || FD_ISSET(sockfd, &fdwset)) {
             socklen_t errlen = sizeof(error);
+#ifdef _WIN32
+            // Windows: getsockopt 需要 char*
+            if ((ret = getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char *)&error,
+                                  &errlen)) != 0) {
+#else
             if ((ret = getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error,
                                   &errlen)) != 0) {
+#endif
                 /* getsockopt error */
-                gettimeofday(&end, NULL);
-                *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                           (end.tv_usec - start.tv_usec) / 1000.0;
+                *time_ms = get_time_ms() - start;
                 return TCPING_ERROR;
             }
             if (error != 0) {
                 /* closed */
-                gettimeofday(&end, NULL);
-                *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                           (end.tv_usec - start.tv_usec) / 1000.0;
+                *time_ms = get_time_ms() - start;
                 return TCPING_CLOSED;
             }
         } else {
-            gettimeofday(&end, NULL);
-            *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                       (end.tv_usec - start.tv_usec) / 1000.0;
+            *time_ms = get_time_ms() - start;
             return TCPING_ERROR;
         }
     }
     /* connection established */
-    gettimeofday(&end, NULL);
-    *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-               (end.tv_usec - start.tv_usec) / 1000.0;
+    *time_ms = get_time_ms() - start;
     return TCPING_OPEN;
 }
 

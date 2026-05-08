@@ -5,13 +5,6 @@
  *
  */
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
-
 #include "tcping.h"
 
 void usage(char *prog)
@@ -23,8 +16,86 @@ void usage(char *prog)
     exit(-1);
 }
 
+// 跨平台睡眠函数（毫秒）
+static void sleep_ms(int milliseconds)
+{
+#ifdef _WIN32
+    Sleep(milliseconds);
+#else
+    usleep(milliseconds * 1000);
+#endif
+}
+
+// 跨平台获取最后错误信息
+static const char* get_last_error_str(void)
+{
+#ifdef _WIN32
+    static char err_buf[256];
+    int err = WSAGetLastError();
+    snprintf(err_buf, sizeof(err_buf), "WSAError %d", err);
+    return err_buf;
+#else
+    return strerror(errno);
+#endif
+}
+
+#ifdef _WIN32
+// Windows: 简单的参数解析（替代 getopt）
+static int win_optind = 1;
+static char *win_optarg = NULL;
+
+static int win_getopt(int argc, char *argv[], const char *optstring)
+{
+    static char *nextchar = NULL;
+    
+    if (nextchar == NULL || *nextchar == '\0') {
+        if (win_optind >= argc) return -1;
+        
+        char *arg = argv[win_optind];
+        if (arg[0] != '-' || arg[1] == '\0') return -1;
+        
+        nextchar = arg + 1;
+    }
+    
+    int opt = *nextchar++;
+    if (*nextchar == '\0') win_optind++;
+    
+    // 查找选项是否需要参数
+    const char *p = strchr(optstring, opt);
+    if (p == NULL) return '?';  // 未知选项
+    
+    if (p[1] == ':') {  // 需要参数
+        if (*nextchar != '\0') {
+            win_optarg = nextchar;
+            nextchar = NULL;
+            win_optind++;
+        } else if (win_optind < argc) {
+            win_optarg = argv[win_optind++];
+        } else {
+            return '?';  // 缺少参数
+        }
+    } else {
+        win_optarg = NULL;
+    }
+    
+    return opt;
+}
+
+#define getopt(argc, argv, optstring) win_getopt(argc, argv, optstring)
+#define optarg win_optarg
+#define optind win_optind
+#endif
+
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32
+    // Windows: 初始化 Winsock
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        fprintf(stderr, "error: WSAStartup failed\n");
+        return 255;
+    }
+#endif
 
     int force_ai_family = AF_UNSPEC;
     long timeout_sec = 0, timeout_usec = 0;
@@ -105,7 +176,7 @@ int main(int argc, char *argv[])
         switch (result) {
         case TCPING_ERROR:
             log(verbosity, stderr, "error: %s port %s: %s (%.3f ms)\n", host->name,
-                host->serv, strerror(errno), time_ms);
+                host->serv, get_last_error_str(), time_ms);
             fail_count++;
             retval = 255;
             break;
@@ -135,7 +206,7 @@ int main(int argc, char *argv[])
 
         // 如果不是最后一次，稍微延迟一下
         if (i < count - 1) {
-            usleep(100000);  // 100ms 间隔
+            sleep_ms(100);  // 100ms 间隔
         }
     }
 
@@ -153,5 +224,8 @@ int main(int argc, char *argv[])
 
 quit:
     tcping_freehostinfo(host);
+#ifdef _WIN32
+    WSACleanup();
+#endif
     return retval;
 }

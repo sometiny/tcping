@@ -1,18 +1,37 @@
 #ifndef __TCPING_H__
 #define __TCPING_H__
 
+#ifdef _WIN32
+// Windows 平台
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
+// MinGW 已定义 EINPROGRESS，不需要重定义
+#ifndef EINPROGRESS
+#define EINPROGRESS WSAEINPROGRESS
+#endif
+
+typedef int socklen_t;
+#define close closesocket
+
+#else
+// Linux/Unix/macOS 平台
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define TCPING_VERSION "2.1.0"
 
@@ -27,12 +46,6 @@
 #define TCPING_CLOSED 1
 #define TCPING_TIMEOUT 2
 #define TCPING_ERROR 255
-
-// 返回连接时间(毫秒)的结构体
-struct tcping_result {
-    int status;
-    double time_ms;  // 连接时间，毫秒
-};
 
 struct hostinfo {
     struct addrinfo *ai;
