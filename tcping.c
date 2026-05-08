@@ -22,11 +22,8 @@ int tcping_gethostinfo(char *node, char *serv, int ai_family,
 
 void tcping_freehostinfo(struct hostinfo *hi)
 {
-    if (hi) {
-        if (hi->ai)
-            freeaddrinfo(hi->ai);
-        free(hi);
-    }
+    freeaddrinfo(hi->ai);
+    free(hi);
 }
 
 int tcping_socket(struct hostinfo *host)
@@ -37,11 +34,18 @@ int tcping_socket(struct hostinfo *host)
     return sockfd;
 }
 
-int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout)
+int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout,
+                   double *time_ms)
 {
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+
     int ret;
     if ((ret = connect(sockfd, host->ai->ai_addr, host->ai->ai_addrlen)) != 0) {
         if (errno != EINPROGRESS) {
+            gettimeofday(&end, NULL);
+            *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                       (end.tv_usec - start.tv_usec) / 1000.0;
             return TCPING_ERROR;
         }
         fd_set fdrset, fdwset;
@@ -53,6 +57,9 @@ int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout)
                                                                  : NULL)) ==
             0) {
             /* timeout */
+            gettimeofday(&end, NULL);
+            *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                       (end.tv_usec - start.tv_usec) / 1000.0;
             return TCPING_TIMEOUT;
         }
         int error = 0;
@@ -61,17 +68,29 @@ int tcping_connect(int sockfd, struct hostinfo *host, struct timeval *timeout)
             if ((ret = getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error,
                                   &errlen)) != 0) {
                 /* getsockopt error */
+                gettimeofday(&end, NULL);
+                *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                           (end.tv_usec - start.tv_usec) / 1000.0;
                 return TCPING_ERROR;
             }
             if (error != 0) {
                 /* closed */
+                gettimeofday(&end, NULL);
+                *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                           (end.tv_usec - start.tv_usec) / 1000.0;
                 return TCPING_CLOSED;
             }
         } else {
+            gettimeofday(&end, NULL);
+            *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                       (end.tv_usec - start.tv_usec) / 1000.0;
             return TCPING_ERROR;
         }
     }
     /* connection established */
+    gettimeofday(&end, NULL);
+    *time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+               (end.tv_usec - start.tv_usec) / 1000.0;
     return TCPING_OPEN;
 }
 
